@@ -15,105 +15,133 @@ Personal homelab built on a Dell OptiPlex 7070 Micro running Proxmox VE. Used fo
 ## Services Running
 
 | Service | Platform | Purpose |
-|---------|----------|---------| 
+|---------|----------|---------|
 | Ubuntu Server VM | Proxmox VM | Base for all Docker services |
 | Pi-hole | Docker | Network-wide DNS + ad blocking |
 | Jellyfin | Docker | Media server |
 | Nginx Proxy Manager | Docker | Reverse proxy / local domain routing |
 | Portainer | Docker | Docker management UI |
 | pfSense | Proxmox VM | Edge firewall, VLANs, network segmentation, WireGuard VPN |
-| Tailscale | Host + VM | Remote access VPN |
+| Tailscale | Host + VM | Remote access VPN mesh |
 
 ## Network Architecture
 
 ```
 Internet
     |
-Deco BE67 Mesh Router (192.168.68.1)
+Deco BE67 Mesh Router (ISP Gateway)
     |
-    ├── Proxmox Host (192.168.68.100) [Tailscale: 100.74.48.44]
-    |       └── pfSense VM (WAN: 192.168.68.54)
-    |               └── pfSense LAN (172.16.0.1/24)
-    |                       └── Ubuntu Server VM (172.16.0.52) [Tailscale: 100.115.128.31]
+    ├── Proxmox Host (accessible via Tailscale)
+    |       └── pfSense VM
+    |               ├── WAN — gets IP from ISP router via DHCP
+    |               └── LAN — 172.16.0.0/24 (pfSense manages this subnet)
+    |                       └── Ubuntu Server VM (172.16.0.52)
     |                               ├── Pi-hole (port 8888)
     |                               ├── Jellyfin (port 8096)
     |                               ├── Nginx Proxy Manager (ports 80/443/81)
     |                               └── Portainer (port 9000)
     |
-    └── IoT VLAN 10 (192.168.10.0/24) — via pfSense
+    └── IoT VLAN 10 — 192.168.10.0/24 (isolated via pfSense)
 ```
 
-### Access Methods
+### Proxmox Bridge Layout
 
-| Service | Local (via pfSense port forward) | Remote (Tailscale) |
-|---------|-----------------------------------|--------------------|
-| pfSense WebUI | http://192.168.68.54 | N/A |
-| Portainer | http://192.168.68.54:9000 | http://100.115.128.31:9000 |
-| Jellyfin | http://192.168.68.54:8096 | http://100.115.128.31:8096 |
-| Pi-hole | http://192.168.68.54:8888/admin | http://100.115.128.31:8888/admin |
-| NPM Admin | http://192.168.68.54:81 | http://100.115.128.31:81 |
+| Bridge | Role | Connected To |
+|--------|------|-------------|
+| vmbr0 | WAN bridge | Physical NIC (nic0) → ISP router |
+| vmbr1 | LAN bridge | Internal only → pfSense LAN → homelab VMs |
+
+### pfSense Port Forwards (WAN → LAN)
+
+| Service | External Port | Internal Target |
+|---------|--------------|----------------|
+| Portainer | 9000 | 172.16.0.52:9000 |
+| Jellyfin | 8096 | 172.16.0.52:8096 |
+| Pi-hole | 8888 | 172.16.0.52:8888 |
+| NPM Admin | 81 | 172.16.0.52:81 |
+| WireGuard VPN | 51820/UDP | pfSense WireGuard tunnel |
 
 ## Projects
 
-### Proxmox VE Setup
+### 1. Proxmox VE Setup
 - Installed Proxmox VE bare metal on OptiPlex 7070
-- Configured VM templates, storage pools, networking
-- Installed Tailscale for remote Proxmox access from anywhere
-- Disabled sleep for 24/7 uptime
+- Configured VM templates, storage pools, and networking bridges
+- Disabled sleep/hibernation for 24/7 uptime
+- Installed Tailscale on Proxmox host for secure remote management
 
-### Ubuntu Server + Static IP
-- Deployed Ubuntu Server VM with static IP via Netplan
-- Serves as the Docker host for all containerized services
-- Migrated from direct LAN to pfSense LAN subnet (172.16.0.0/24)
+### 2. Ubuntu Server VM
+- Deployed Ubuntu Server 22.04 LTS as Proxmox VM
+- Configured static IP via Netplan on `ens18` interface
+- Serves as Docker host for all containerized services
+- Migrated between network subnets as homelab architecture evolved
 
-### Pi-hole DNS Server
-- Network-wide ad blocking via DNS filtering
-- Custom local DNS records for clean homelab URLs
-- Moved from port 80 to 8888 to allow Nginx Proxy Manager
+### 3. Pi-hole DNS Server
+- Network-wide ad and tracker blocking via DNS filtering
+- Moved from default port 80 to port 8888 to free ports for NPM
+- Custom local DNS records for clean homelab domain resolution
+- Set as primary DNS on router; Google DNS as secondary fallback
 
-### Docker Service Stack
+### 4. Docker Service Stack
 - Deployed Jellyfin, Nginx Proxy Manager, and Portainer via Docker
-- Resolved port conflicts between Pi-hole and NPM
-- Clean local domain access via Pi-hole DNS + NPM reverse proxy
+- Resolved port conflicts between Pi-hole (HTTP) and NPM (80/443)
+- NPM reverse proxy routes `jellyfin.home` to Jellyfin container
 
-### Tailscale Remote Access
-- Zero-config VPN across all homelab devices
-- Access Proxmox, Jellyfin, Portainer from anywhere without port forwarding
-- Survived network restructure — operates independently of local subnet changes
+### 5. pfSense Firewall + Network Segmentation
+- pfSense CE installed as Proxmox VM
+- Promoted to true edge firewall with dedicated WAN/LAN bridge separation
+  - `vmbr0` — WAN bridge connected to physical NIC (ISP-facing)
+  - `vmbr1` — LAN bridge (internal only, pfSense manages subnet)
+- All homelab VMs moved behind pfSense LAN (172.16.0.0/24)
+- Firewall rules controlling traffic between zones
+- Disabled "Block Private Networks" on WAN (required for double-NAT behind ISP mesh router)
 
-### pfSense Firewall + Network Segmentation
-- pfSense VM promoted to true homelab edge firewall
-- Separate vmbr0 (WAN bridge) and vmbr1 (LAN bridge) in Proxmox
-- All homelab services routed through pfSense LAN (172.16.0.0/24)
-- IoT VLAN (VLAN 10) isolating smart devices from main LAN
-- Firewall rules: Block IoT-to-LAN, Allow IoT-to-Internet
-- Port forwarding for all services through pfSense WAN
-- WireGuard VPN tunnel configured (HomeVPN, port 51820)
-- Blocked private network rule disabled (required for double-NAT behind ISP router)
+### 6. VLAN Segmentation (IoT Isolation)
+- Created VLAN 10 for IoT device isolation
+- pfSense OPT1 interface: `192.168.10.1/24`
+- DHCP scope: `192.168.10.100–200`
+- Firewall rules:
+  - Block IoT → LAN (prevents IoT devices accessing homelab)
+  - Allow IoT → Internet (IoT devices maintain internet access)
+  - Block LAN → IoT (no uninitiated access from LAN to IoT)
 
-### Nginx Proxy Manager
-- Reverse proxy routing clean URLs to backend services
-- Local DNS records in Pi-hole for homelab domain resolution
-- Example: http://jellyfin.home routes to Jellyfin on port 8096
+### 7. WireGuard VPN
+- WireGuard tunnel configured in pfSense (HomeVPN)
+- Listen port 51820 UDP
+- VPN subnet: `10.0.0.0/24`
+- Port forwarded through ISP router to pfSense WAN
+- Enables encrypted remote access to homelab from any network
 
-### Packet Analysis with Wireshark
-- Captured and analyzed live network traffic on Windows laptop
-- Identified DNS queries, TCP handshakes, CDN traffic (Akamai, Fastly, Cloudflare)
-- Followed HTTP/HTTPS streams; demonstrated plaintext HTTP vs encrypted HTTPS
-- Identified Tailscale DNS resolver (100.100.100.100) in traffic
-- Applied security filters: NXDOMAIN detection, non-standard DNS servers, RST flood indicators
+### 8. Nginx Proxy Manager
+- Reverse proxy for clean local domain routing
+- `jellyfin.home` → Jellyfin container (port 8096)
+- Works alongside Pi-hole DNS for local name resolution
+
+### 9. Tailscale Remote Access
+- Zero-config mesh VPN deployed on Proxmox host and Ubuntu VM
+- Encrypted remote access without port forwarding
+- Survives network restructuring — operates independently of local subnet changes
+- Used as fallback remote access when WireGuard port forwarding unavailable
+
+### 10. Packet Analysis with Wireshark
+- Captured and analyzed live network traffic on Windows
+- Identified DNS query/response cycles, TTLs, and record types
+- Recognized CDN traffic from Akamai, Fastly, and Cloudflare
+- Identified Tailscale DNS resolver in local traffic
+- Applied security-focused filters: NXDOMAIN detection, non-standard DNS servers, TCP RST analysis
+- Followed TCP streams; compared plaintext HTTP vs encrypted HTTPS
+- Demonstrated why HTTPS is required — HTTP streams visible in plaintext
 
 ## Skills Demonstrated
 
-- **Virtualization**: Proxmox VE, VM deployment, bridge networking (vmbr0/vmbr1)
-- **Networking**: VLANs, subnetting, DHCP, DNS, NAT, firewall rules, port forwarding, double-NAT
-- **Linux**: Ubuntu Server, Netplan, systemd, package management, tcpdump
-- **Containerization**: Docker, docker-compose, Portainer
-- **Security**: Network segmentation, firewall rules, Pi-hole DNS filtering, WireGuard VPN, packet analysis
-- **Remote Access**: Tailscale VPN, SSH, WireGuard
-- **Troubleshooting**: Network connectivity debugging, ARP analysis, bridge interface issues
+- **Virtualization**: Proxmox VE, VM lifecycle management, bridge networking (vmbr0/vmbr1)
+- **Networking**: VLANs, subnetting, DHCP, DNS, NAT, firewall rules, port forwarding, double-NAT troubleshooting
+- **Linux**: Ubuntu Server, Netplan static IP config, systemd, package management, tcpdump
+- **Containerization**: Docker, docker-compose, Portainer, container networking
+- **Security**: Network segmentation, VLAN isolation, firewall rules, Pi-hole DNS filtering, WireGuard VPN, packet analysis
+- **Remote Access**: Tailscale mesh VPN, WireGuard, SSH
+- **Troubleshooting**: ARP debugging, bridge interface issues, DHCP conflicts, pfSense firewall rule ordering
 
 ## Certifications & Education
 
 - CompTIA Network+ (in progress, target April 2026)
-- Long Beach City College — COSN 205 (Unix/Linux), COSN 299 (Networking Capstone), COSS 71 (Network Security)
+- Long Beach City College — COSN 205 (Unix/Linux Fundamentals), COSN 299 (Networking & Security Capstone), COSS 71 (Network Security Fundamentals)
