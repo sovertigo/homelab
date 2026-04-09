@@ -8,8 +8,9 @@ Personal homelab built on a Dell OptiPlex 7070 Micro running Proxmox VE. Used fo
 |-----------|---------|
 | Host | Dell OptiPlex 7070 Micro |
 | CPU | Intel i5-9500T |
-| RAM | 16GB |
-| Storage | 256GB NVMe SSD |
+| RAM | 16GB DDR4 |
+| Storage (OS) | 256GB NVMe SSD |
+| Storage (Data) | 2TB Crucial SSD (SATA) |
 | Hypervisor | Proxmox VE (bare metal) |
 
 ## Services Running
@@ -18,11 +19,14 @@ Personal homelab built on a Dell OptiPlex 7070 Micro running Proxmox VE. Used fo
 |---------|----------|---------|
 | Ubuntu Server VM | Proxmox VM | Base for all Docker services |
 | Pi-hole | Docker | Network-wide DNS + ad blocking |
-| Jellyfin | Docker | Media server |
+| Jellyfin | Docker | Media server (1.7TB NFS storage) |
 | Nginx Proxy Manager | Docker | Reverse proxy / local domain routing |
 | Portainer | Docker | Docker management UI |
+| ntfy | Docker | Self-hosted push notification server |
+| Uptime Kuma | Docker | Service monitoring + alerting |
 | pfSense | Proxmox VM | Edge firewall, VLANs, network segmentation, WireGuard VPN |
 | Tailscale | Host + VM | Remote access VPN mesh |
+| Samba | Ubuntu VM | NAS-style network share (SMB) |
 
 ## Network Architecture
 
@@ -32,6 +36,8 @@ Internet
 Deco BE67 Mesh Router (ISP Gateway)
     |
     ├── Proxmox Host (accessible via Tailscale)
+    |       ├── 2TB SSD mounted at /mnt/data
+    |       |     └── NFS export → Ubuntu VM (/mnt/media)
     |       └── pfSense VM
     |               ├── WAN — gets IP from ISP router via DHCP
     |               └── LAN — 172.16.0.0/24 (pfSense manages this subnet)
@@ -39,7 +45,10 @@ Deco BE67 Mesh Router (ISP Gateway)
     |                               ├── Pi-hole (port 8888)
     |                               ├── Jellyfin (port 8096)
     |                               ├── Nginx Proxy Manager (ports 80/443/81)
-    |                               └── Portainer (port 9000)
+    |                               ├── Portainer (port 9000)
+    |                               ├── ntfy (port 8090)
+    |                               ├── Uptime Kuma (port 3001)
+    |                               └── Samba (port 445 — SMB share)
     |
     └── IoT VLAN 10 — 192.168.10.0/24 (isolated via pfSense)
 ```
@@ -131,15 +140,42 @@ Deco BE67 Mesh Router (ISP Gateway)
 - Followed TCP streams; compared plaintext HTTP vs encrypted HTTPS
 - Demonstrated why HTTPS is required — HTTP streams visible in plaintext
 
+### 11. NAS Storage Build (2TB SSD)
+- Installed 2TB Crucial SATA SSD into OptiPlex 7070 second bay
+- Partitioned and formatted with ext4; mounted at `/mnt/data` on Proxmox host
+- Registered as Proxmox storage pool (`ssd-storage`) for VM disks, backups, and ISOs
+- Set up NFS server on Proxmox; exported `/mnt/data/media` to 172.16.0.0/24 subnet
+- Ubuntu VM auto-mounts NFS share at `/mnt/media` on boot via `/etc/fstab` with `_netdev`
+- Proxmox host assigned static IP `172.16.0.2` on vmbr1 for internal NFS routing
+- Jellyfin Docker container updated to use NFS-backed `/mnt/media` for library storage
+- Result: 1.7TB available for media storage, persistent across reboots
+
+### 12. Samba NAS Share (Windows Network Drive)
+- Installed Samba on Ubuntu VM; configured `/mnt/media` as SMB share
+- Share accessible from Windows via `\\<tailscale-ip>` in File Explorer
+- Mapped as permanent network drive (M:) on Windows laptop
+- Enables drag-and-drop file transfers directly to homelab storage
+- Jellyfin auto-detects new media dropped into `/mnt/media/movies`, `/tv`, `/music`
+
+### 13. Monitoring & Alerting (Uptime Kuma + ntfy)
+- Deployed ntfy (self-hosted push notification server) on Docker port 8090
+- Deployed Uptime Kuma (uptime monitoring) on Docker port 3001
+- Uptime Kuma monitors: Jellyfin, Portainer, Pi-hole, Nginx Proxy Manager, Proxmox
+- ntfy integrated as Uptime Kuma notification channel
+- Push notifications delivered to phone via ntfy app over Tailscale
+- Full alerting pipeline: service down → Uptime Kuma detects → ntfy → phone notification
+
 ## Skills Demonstrated
 
 - **Virtualization**: Proxmox VE, VM lifecycle management, bridge networking (vmbr0/vmbr1)
-- **Networking**: VLANs, subnetting, DHCP, DNS, NAT, firewall rules, port forwarding, double-NAT troubleshooting
-- **Linux**: Ubuntu Server, Netplan static IP config, systemd, package management, tcpdump
+- **Networking**: VLANs, subnetting, DHCP, DNS, NAT, firewall rules, port forwarding, double-NAT troubleshooting, NFS, SMB/Samba
+- **Linux**: Ubuntu Server, Netplan static IP config, systemd, package management, tcpdump, NFS exports, fstab
 - **Containerization**: Docker, docker-compose, Portainer, container networking
+- **Storage**: SSD installation, partition management, ext4 formatting, NFS server/client, Samba file sharing
 - **Security**: Network segmentation, VLAN isolation, firewall rules, Pi-hole DNS filtering, WireGuard VPN, packet analysis
-- **Remote Access**: Tailscale mesh VPN, WireGuard, SSH
-- **Troubleshooting**: ARP debugging, bridge interface issues, DHCP conflicts, pfSense firewall rule ordering
+- **Remote Access**: Tailscale mesh VPN, WireGuard, SSH, SMB over Tailscale
+- **Monitoring**: Uptime Kuma, ntfy push notifications, service health checks
+- **Troubleshooting**: ARP debugging, bridge interface issues, DHCP conflicts, pfSense firewall rule ordering, NFS routing, fstab boot hang recovery
 
 ## Certifications & Education
 
