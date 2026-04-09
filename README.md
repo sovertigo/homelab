@@ -24,6 +24,7 @@ Personal homelab built on a Dell OptiPlex 7070 Micro running Proxmox VE. Used fo
 | Portainer | Docker | Docker management UI |
 | ntfy | Docker | Self-hosted push notification server |
 | Uptime Kuma | Docker | Service monitoring + alerting |
+| Dashy | Docker | Homelab dashboard |
 | pfSense | Proxmox VM | Edge firewall, VLANs, network segmentation, WireGuard VPN |
 | Tailscale | Host + VM | Remote access VPN mesh |
 | Samba | Ubuntu VM | NAS-style network share (SMB) |
@@ -157,6 +158,15 @@ Deco BE67 Mesh Router (ISP Gateway)
 - Enables drag-and-drop file transfers directly to homelab storage
 - Jellyfin auto-detects new media dropped into `/mnt/media/movies`, `/tv`, `/music`
 
+### 14. Homelab Dashboard (Dashy) + Local DNS
+
+- Deployed Dashy on Docker port 4000 as a central homelab homepage
+- Configured three sections: Infrastructure (Proxmox, pfSense, Portainer), Services (Jellyfin, Pi-hole, NPM), Monitoring (Uptime Kuma, ntfy)
+- Config mounted via volume (`~/dashy-conf.yml`) for easy editing
+- Added Pi-hole local DNS records using `.casita` custom domain suffix
+- All services accessible by name (e.g. `jellyfin.casita`, `proxmox.casita`) when on local network with Pi-hole as DNS
+- Single bookmark (`http://<tailscale-ip>:4000`) replaces memorizing all service IPs and ports
+
 ### 13. Monitoring & Alerting (Uptime Kuma + ntfy)
 - Deployed ntfy (self-hosted push notification server) on Docker port 8090
 - Deployed Uptime Kuma (uptime monitoring) on Docker port 3001
@@ -175,6 +185,7 @@ Deco BE67 Mesh Router (ISP Gateway)
 - **Security**: Network segmentation, VLAN isolation, firewall rules, Pi-hole DNS filtering, WireGuard VPN, packet analysis
 - **Remote Access**: Tailscale mesh VPN, WireGuard, SSH, SMB over Tailscale
 - **Monitoring**: Uptime Kuma, ntfy push notifications, service health checks
+- **Dashboard**: Dashy homelab homepage, custom DNS with Pi-hole (.casita domain)
 - **Troubleshooting**: ARP debugging, bridge interface issues, DHCP conflicts, pfSense firewall rule ordering, NFS routing, fstab boot hang recovery
 
 ## Certifications & Education
