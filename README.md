@@ -39,8 +39,8 @@ Deco BE67 Mesh Router (ISP Gateway)
     |       ├── 2TB SSD mounted at /mnt/data
     |       |     └── NFS export → Ubuntu VM (/mnt/media)
     |       └── pfSense VM
-    |               ├── WAN — gets IP from ISP router via DHCP
-    |               └── LAN — 172.16.0.0/24 (pfSense manages this subnet)
+    |               ├── WAN (DHCP from ISP router)
+    |               └── LAN (172.16.0.0/24, managed by pfSense)
     |                       └── Ubuntu Server VM (172.16.0.52)
     |                               ├── Pi-hole (port 8888)
     |                               ├── Jellyfin (port 8096)
@@ -48,7 +48,7 @@ Deco BE67 Mesh Router (ISP Gateway)
     |                               ├── Portainer (port 9000)
     |                               ├── ntfy (port 8090)
     |                               ├── Uptime Kuma (port 3001)
-    |                               └── Samba (port 445 — SMB share)
+    |                               └── Samba (port 445, SMB share)
     |
     └── IoT VLAN 10 — 192.168.10.0/24 (isolated via pfSense)
 ```
@@ -102,7 +102,7 @@ Deco BE67 Mesh Router (ISP Gateway)
   - `vmbr1` — LAN bridge (internal only, pfSense manages subnet)
 - All homelab VMs moved behind pfSense LAN (172.16.0.0/24)
 - Firewall rules controlling traffic between zones
-- Disabled "Block Private Networks" on WAN (required for double-NAT behind ISP mesh router)
+- Disabled "Block Private Networks" on WAN (double-NAT environment behind ISP mesh router)
 
 ### 6. VLAN Segmentation (IoT Isolation)
 - Created VLAN 10 for IoT device isolation
@@ -128,7 +128,7 @@ Deco BE67 Mesh Router (ISP Gateway)
 ### 9. Tailscale Remote Access
 - Zero-config mesh VPN deployed on Proxmox host and Ubuntu VM
 - Encrypted remote access without port forwarding
-- Survives network restructuring — operates independently of local subnet changes
+- Survives network restructuring and stays stable through network changes
 - Used as fallback remote access when WireGuard port forwarding unavailable
 
 ### 10. Packet Analysis with Wireshark
@@ -138,7 +138,7 @@ Deco BE67 Mesh Router (ISP Gateway)
 - Identified Tailscale DNS resolver in local traffic
 - Applied security-focused filters: NXDOMAIN detection, non-standard DNS servers, TCP RST analysis
 - Followed TCP streams; compared plaintext HTTP vs encrypted HTTPS
-- Demonstrated why HTTPS is required — HTTP streams visible in plaintext
+- Demonstrated why HTTPS matters; HTTP streams are readable in plaintext
 
 ### 11. NAS Storage Build (2TB SSD)
 - Installed 2TB Crucial SATA SSD into OptiPlex 7070 second bay
